@@ -170,7 +170,6 @@ export class AppleAdsClient {
     orgId: number;
     orgName: string;
     currency: string;
-    timeZone?: string;
     paymentModel: string;
     roleNames: string[];
   }>>> {
