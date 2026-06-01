@@ -44,7 +44,7 @@ export const createAdGroupSchema = z.object({
   name: z.string().describe("Ad group name"),
   defaultCpcBid: z.string().describe("Default cost-per-click bid amount"),
   currency: z.string().describe("Currency code (e.g., 'USD')"),
-  startTime: z.string().describe("Start time in ISO format (e.g., '2024-01-01T00:00:00.000')"),
+  startTime: z.string().optional().describe("Start time in ISO format (e.g., '2024-01-01T00:00:00.000'). Optional — defaults to ~now in the org's time zone (like the web console). Must be in the future; the API rejects past times."),
   endTime: z.string().optional().describe("Optional end time"),
   cpaGoal: z.string().optional().describe("Optional cost-per-acquisition goal"),
   automatedKeywordsOptIn: z.boolean().optional().default(false)
@@ -107,7 +107,7 @@ export const adGroupToolDefinitions = [
         name: { type: "string", description: "Ad group name" },
         defaultCpcBid: { type: "string", description: "Default cost-per-click bid amount" },
         currency: { type: "string", description: "Currency code (e.g., 'USD')" },
-        startTime: { type: "string", description: "Start time in ISO format" },
+        startTime: { type: "string", description: "Optional start time, ISO format (e.g. '2024-01-01T00:00:00.000'). Defaults to ~now in the org's time zone, like the web console. Must be in the future." },
         endTime: { type: "string", description: "Optional end time" },
         cpaGoal: { type: "string", description: "Optional CPA goal amount" },
         automatedKeywordsOptIn: { 
@@ -179,7 +179,7 @@ export const adGroupToolDefinitions = [
         },
         status: { type: "string", enum: ["ENABLED", "PAUSED"] },
       },
-      required: ["campaignId", "name", "defaultCpcBid", "currency", "startTime"],
+      required: ["campaignId", "name", "defaultCpcBid", "currency"],
     },
   },
   {
@@ -268,14 +268,39 @@ export const adGroupToolDefinitions = [
 // Tool Handlers
 // ============================================
 
+// Format `now + bufferMinutes` as a naive "YYYY-MM-DDTHH:mm:ss.000" string in the
+// given IANA time zone. ASA interprets naive ad-group startTimes in the org's time
+// zone and rejects past values, so we default to a few minutes ahead in that zone —
+// mirroring what the web console does silently.
+function nowInTimeZone(timeZone: string, bufferMinutes = 5): string {
+  const d = new Date(Date.now() + bufferMinutes * 60 * 1000);
+  const p = new Intl.DateTimeFormat("en-US", {
+    timeZone,
+    year: "numeric", month: "2-digit", day: "2-digit",
+    hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
+  }).formatToParts(d).reduce((acc, part) => {
+    acc[part.type] = part.value;
+    return acc;
+  }, {} as Record<string, string>);
+  const hour = p.hour === "24" ? "00" : p.hour;
+  return `${p.year}-${p.month}-${p.day}T${hour}:${p.minute}:${p.second}.000`;
+}
+
 export async function handleCreateAdGroup(
   client: AppleAdsClient,
   args: z.infer<typeof createAdGroupSchema>
 ): Promise<string> {
+  let startTime = args.startTime;
+  if (!startTime) {
+    // Default to ~now in the org's time zone (like the console), avoiding TIME_IN_PAST.
+    const acl = await client.getUserAcl();
+    const timeZone = acl.data?.[0]?.timeZone || "UTC";
+    startTime = nowInTimeZone(timeZone);
+  }
   const result = await client.createAdGroup(args.campaignId, {
     name: args.name,
     defaultCpcBid: { amount: args.defaultCpcBid, currency: args.currency },
-    startTime: args.startTime,
+    startTime,
     endTime: args.endTime,
     cpaGoal: args.cpaGoal ? { amount: args.cpaGoal, currency: args.currency } : undefined,
     automatedKeywordsOptIn: args.automatedKeywordsOptIn,

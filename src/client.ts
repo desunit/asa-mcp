@@ -170,6 +170,7 @@ export class AppleAdsClient {
     orgId: number;
     orgName: string;
     currency: string;
+    timeZone?: string;
     paymentModel: string;
     roleNames: string[];
   }>>> {
@@ -239,11 +240,13 @@ export class AppleAdsClient {
     dailyBudgetAmount?: { amount: string; currency: string };
     adChannelType?: string;
     supplySources?: string[];
+    billingEvent?: string;
   }): Promise<ApiResponse<{ id: number }>> {
     const payload = {
       ...campaign,
       adChannelType: campaign.adChannelType || "SEARCH",
       supplySources: campaign.supplySources || ["APPSTORE_SEARCH_RESULTS"],
+      billingEvent: campaign.billingEvent || "TAPS",
     };
     return this.post("/campaigns", payload);
   }
@@ -313,8 +316,15 @@ export class AppleAdsClient {
       appDownloaders?: { included: number[]; excluded: number[] };
     };
     status?: "ENABLED" | "PAUSED";
+    pricingModel?: string;
   }): Promise<ApiResponse<{ id: number }>> {
-    return this.post(`/campaigns/${campaignId}/adgroups`, adGroup);
+    const { defaultCpcBid, ...rest } = adGroup;
+    const payload = {
+      ...rest,
+      defaultBidAmount: defaultCpcBid,
+      pricingModel: adGroup.pricingModel || "CPC",
+    };
+    return this.post(`/campaigns/${campaignId}/adgroups`, payload);
   }
   
   /**
@@ -356,7 +366,11 @@ export class AppleAdsClient {
     };
     status?: "ENABLED" | "PAUSED";
   }): Promise<ApiResponse<unknown>> {
-    return this.put(`/campaigns/${campaignId}/adgroups/${adGroupId}`, updates);
+    const { defaultCpcBid, ...rest } = updates;
+    const payload = defaultCpcBid
+      ? { ...rest, defaultBidAmount: defaultCpcBid }
+      : rest;
+    return this.put(`/campaigns/${campaignId}/adgroups/${adGroupId}`, payload);
   }
   
   /**
